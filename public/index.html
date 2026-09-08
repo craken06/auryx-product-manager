@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Carga de Productos - Compragamer Solar</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 800px; margin: 30px auto; padding: 0 15px; background:#f7f7f9; color:#222; }
+  h1 { font-size: 22px; }
+  .card { background:#fff; border:1px solid #ddd; border-radius:10px; padding:20px; margin-bottom:20px; }
+  label { display:block; margin-top:12px; font-weight:600; font-size:14px; }
+  input, select, textarea { width:100%; padding:8px; margin-top:4px; border:1px solid #ccc; border-radius:6px; font-size:14px; box-sizing:border-box; }
+  textarea { font-family: monospace; min-height:220px; }
+  .row { display:flex; gap:12px; }
+  .row > div { flex:1; }
+  button { margin-top:16px; padding:10px 18px; border:none; border-radius:6px; background:#2563eb; color:#fff; font-size:15px; cursor:pointer; }
+  button:hover { background:#1d4ed8; }
+  button.secondary { background:#6b7280; margin-left:8px; }
+  button.secondary:hover { background:#4b5563; }
+  button.danger { background:#dc2626; }
+  button.danger:hover { background:#b91c1c; }
+  button.small { padding:4px 10px; font-size:12px; margin:0 4px 0 0; }
+  #msg { margin-top:12px; padding:10px; border-radius:6px; display:none; font-size:14px; }
+  #msg.ok { background:#dcfce7; color:#166534; display:block; }
+  #msg.error { background:#fee2e2; color:#991b1b; display:block; }
+  table { width:100%; border-collapse: collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid #eee; }
+  th { background:#f3f4f6; }
+</style>
+</head>
+<body>
+
+<h1>🔆 Carga de Productos</h1>
+
+<div class="card">
+  <label>Categoría</label>
+  <select id="category_id">
+    <option value="">Cargando categorías...</option>
+  </select>
+
+  <div class="row">
+    <div>
+      <label>Marca</label>
+      <input id="brand" placeholder="Canadian Solar">
+    </div>
+    <div>
+      <label>Nombre / Modelo</label>
+      <input id="name" placeholder="CS6R-550MS">
+    </div>
+  </div>
+
+  <div class="row">
+    <div>
+      <label>SKU</label>
+      <input id="sku" placeholder="opcional">
+    </div>
+    <div>
+      <label>Precio</label>
+      <input id="price" type="number" step="0.01" placeholder="185000">
+    </div>
+    <div>
+      <label>Moneda</label>
+      <select id="currency">
+        <option value="ARS">ARS</option>
+        <option value="USD">USD</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="row">
+    <div>
+      <label>Estado de stock</label>
+      <select id="stock_status">
+        <option value="disponible">Disponible</option>
+        <option value="a_pedido">A pedido</option>
+        <option value="sin_stock">Sin stock</option>
+      </select>
+    </div>
+    <div>
+      <label>URL Datasheet</label>
+      <input id="datasheet_url" placeholder="https://...">
+    </div>
+  </div>
+
+  <label>Descripción (opcional)</label>
+  <textarea id="description" style="min-height:60px"></textarea>
+
+  <label>
+    Specs técnicas (JSON)
+    <button type="button" class="secondary" style="margin-top:6px; padding:4px 10px; font-size:12px;" onclick="cargarPlantilla()">Cargar plantilla según categoría</button>
+  </label>
+  <textarea id="specs" placeholder='{"potencia_wp": 550, "voc": 49.5, ...}'></textarea>
+
+  <input type="hidden" id="editing_id" value="">
+  <button id="btn_guardar" onclick="guardarProducto()">💾 Guardar producto</button>
+  <button id="btn_cancelar" class="secondary" style="display:none" onclick="cancelarEdicion()">✖ Cancelar edición</button>
+  <div id="msg"></div>
+</div>
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <h2 style="font-size:16px; margin:0;">Productos cargados</h2>
+    <div>
+      <button class="secondary" onclick="cargarProductos()">🔄 Actualizar lista</button>
+      <button class="danger" onclick="borrarTodos()">🗑️ Borrar todos</button>
+    </div>
+  </div>
+  <div style="margin-top:12px; overflow-x:auto;">
+    <table id="tabla">
+      <thead>
+        <tr><th>ID</th><th>Categoría</th><th>Marca</th><th>Nombre</th><th>Precio</th><th>Stock</th><th>Acciones</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2 style="font-size:16px; margin-top:0;">Categorías (tabla de referencia)</h2>
+  <div style="margin-top:12px; overflow-x:auto;">
+    <table id="tabla_categorias">
+      <thead>
+        <tr><th>ID</th><th>Slug</th><th>Nombre</th><th>Campos definidos en schema</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let categorias = [];
+
+// Plantillas de specs por slug de categoría
+const plantillas = {
+  panel: {
+    potencia_wp: 0, voc: 0, isc: 0, vmp: 0, imp: 0, coef_temp_voc: 0,
+    ip_modulo: "IP68", grado_ip_caja_conexiones: "IP67",
+    normas: ["IEC 61215", "IEC 61730"], clase_fuego: "C",
+    carga_viento_pa: 0, carga_nieve_pa: 0, niebla_salina: false,
+    grosor_vidrio_mm: 0, rango_temp_c: [-40, 85],
+    tiene_cables: true, bastidor_material: ""
+  },
+  inversor: {
+    potencia_nominal_w: 0, tipo: "monofasico", es_microinversor: false,
+    vmpp_min: 0, vmpp_max: 0, corriente_max_entrada: 0,
+    nivel_activacion_fuga_tierra_ma: 0, nivel_fallo_aislamiento: "",
+    proteccion_polaridad_inversa: true, proteccion_sobretemperatura: true,
+    proteccion_sobretension_transitoria: true, proteccion_arco_electrico: false,
+    rele_programable: false, altitud_max_m: 0, humedad_max_pct: 0,
+    ip: "IP65", material_carcasa: "", normas: ["EN 62109", "IEC 62109"],
+    grado_contaminacion: 3
+  },
+  bateria: {
+    capacidad_kwh: 0, tipo: "LiFePO4", vida_util_ciclos: 0,
+    ip: "IP65", temp_almacenamiento_c: [-20, 60],
+    tension_flotacion_v: 0, tension_absorcion_v: 0,
+    normas: ["UL 1973", "IEC 62619"]
+  },
+  proteccion: { tipo: "", compatible_con: [], carga_max_kg: 0, material: "" },
+  accesorio: { tipo: "", compatible_con: [], carga_max_kg: 0, material: "" },
+  soporte: { tipo: "", compatible_con: [], carga_max_kg: 0, material: "" }
+};
+
+async function cargarCategorias() {
+  const res = await fetch('/api/categories');
+  categorias = await res.json();
+  const sel = document.getElementById('category_id');
+  sel.innerHTML = categorias.map(c => `<option value="${c.id}" data-slug="${c.slug}">${c.name}</option>`).join('');
+}
+
+function cargarPlantilla() {
+  const sel = document.getElementById('category_id');
+  const slug = sel.options[sel.selectedIndex]?.dataset.slug;
+  const plantilla = plantillas[slug] || {};
+  document.getElementById('specs').value = JSON.stringify(plantilla, null, 2);
+}
+
+async function guardarProducto() {
+  const msg = document.getElementById('msg');
+  const editingId = document.getElementById('editing_id').value;
+  const body = {
+    category_id: document.getElementById('category_id').value,
+    brand: document.getElementById('brand').value,
+    name: document.getElementById('name').value,
+    sku: document.getElementById('sku').value,
+    price: document.getElementById('price').value,
+    currency: document.getElementById('currency').value,
+    stock_status: document.getElementById('stock_status').value,
+    description: document.getElementById('description').value,
+    datasheet_url: document.getElementById('datasheet_url').value,
+    specs: document.getElementById('specs').value,
+  };
+
+  const esEdicion = !!editingId;
+  const url = esEdicion ? `/api/products/${editingId}` : '/api/products';
+  const method = esEdicion ? 'PUT' : 'POST';
+
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error desconocido');
+
+    msg.textContent = esEdicion
+      ? `✅ Producto ${editingId} actualizado`
+      : `✅ Producto guardado con ID ${data.id}`;
+    msg.className = 'ok';
+    if (esEdicion) cancelarEdicion();
+    cargarProductos();
+  } catch (err) {
+    msg.textContent = '❌ ' + err.message;
+    msg.className = 'error';
+  }
+}
+
+async function editarProducto(id) {
+  const res = await fetch(`/api/products/${id}`);
+  if (!res.ok) return;
+  const p = await res.json();
+
+  document.getElementById('editing_id').value = p.id;
+  document.getElementById('category_id').value = p.category_id;
+  document.getElementById('brand').value = p.brand || '';
+  document.getElementById('name').value = p.name || '';
+  document.getElementById('sku').value = p.sku || '';
+  document.getElementById('price').value = p.price || '';
+  document.getElementById('currency').value = p.currency || 'ARS';
+  document.getElementById('stock_status').value = p.stock_status || 'disponible';
+  document.getElementById('description').value = p.description || '';
+  document.getElementById('datasheet_url').value = p.datasheet_url || '';
+  document.getElementById('specs').value = JSON.stringify(p.specs || {}, null, 2);
+
+  document.getElementById('btn_guardar').textContent = '💾 Actualizar producto';
+  document.getElementById('btn_cancelar').style.display = 'inline-block';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function cancelarEdicion() {
+  document.getElementById('editing_id').value = '';
+  document.getElementById('brand').value = '';
+  document.getElementById('name').value = '';
+  document.getElementById('sku').value = '';
+  document.getElementById('price').value = '';
+  document.getElementById('description').value = '';
+  document.getElementById('datasheet_url').value = '';
+  document.getElementById('specs').value = '';
+  document.getElementById('btn_guardar').textContent = '💾 Guardar producto';
+  document.getElementById('btn_cancelar').style.display = 'none';
+}
+
+async function borrarProducto(id) {
+  if (!confirm(`¿Borrar el producto ID ${id}? Esta acción no se puede deshacer.`)) return;
+  const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
+  const data = await res.json();
+  const msg = document.getElementById('msg');
+  if (!res.ok) {
+    msg.textContent = '❌ ' + data.error;
+    msg.className = 'error';
+    return;
+  }
+  msg.textContent = `✅ Producto ${id} borrado`;
+  msg.className = 'ok';
+  cargarProductos();
+}
+
+async function borrarTodos() {
+  if (!confirm('¿BORRAR TODOS los productos de la base de datos? Esta acción no se puede deshacer.')) return;
+  if (!confirm('Confirmá de nuevo: se van a eliminar TODOS los productos sin posibilidad de recuperarlos. ¿Seguro?')) return;
+  const res = await fetch('/api/products', { method: 'DELETE' });
+  const data = await res.json();
+  const msg = document.getElementById('msg');
+  if (!res.ok) {
+    msg.textContent = '❌ ' + data.error;
+    msg.className = 'error';
+    return;
+  }
+  msg.textContent = '✅ Todos los productos fueron borrados';
+  msg.className = 'ok';
+  cargarProductos();
+}
+
+async function cargarProductos() {
+  const res = await fetch('/api/products');
+  const productos = await res.json();
+  const tbody = document.querySelector('#tabla tbody');
+  tbody.innerHTML = productos.map(p => `
+    <tr>
+      <td>${p.id}</td>
+      <td>${p.category_name}</td>
+      <td>${p.brand}</td>
+      <td>${p.name}</td>
+      <td>${p.price} ${p.currency}</td>
+      <td>${p.stock_status}</td>
+      <td>
+        <button class="secondary small" onclick="editarProducto(${p.id})">✏️ Editar</button>
+        <button class="danger small" onclick="borrarProducto(${p.id})">🗑️ Borrar</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function renderCategorias() {
+  const tbody = document.querySelector('#tabla_categorias tbody');
+  tbody.innerHTML = categorias.map(c => {
+    const campos = c.spec_schema?.properties ? Object.keys(c.spec_schema.properties).join(', ') : '(sin schema)';
+    return `
+      <tr>
+        <td>${c.id}</td>
+        <td>${c.slug}</td>
+        <td>${c.name}</td>
+        <td style="font-size:12px; color:#555;">${campos}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function init() {
+  await cargarCategorias();
+  renderCategorias();
+  cargarProductos();
+}
+
+init();
+</script>
+
+</body>
+</html>
